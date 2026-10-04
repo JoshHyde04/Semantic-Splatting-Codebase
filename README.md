@@ -23,27 +23,83 @@ images ──► feature_extractor.py ──► per-image feature maps (.safeten
 | `chunk_filter.py` | Optional. Finds which COLMAP images see a given splat chunk. |
 | `pyproject.toml` | Dependencies, managed with [uv](https://docs.astral.sh/uv/). |
 
-## Requirements
+## Setup
 
-**Hardware**
+Do these once before running anything.
+
+### Prerequisites checklist
+
+| Need | Why | How to get it |
+|---|---|---|
+| **NVIDIA GPU** (24 GB VRAM comfortable for ViT-7B) | Model inference | See [Hardware](#hardware) below |
+| **uv** | Creates the environment and installs all dependencies | Step 1 |
+| **git** on your PATH | The DINOv3 repo is cloned automatically on first use | [git-scm.com](https://git-scm.com/downloads) |
+| **DINOv3 model weights** (`.pth`) | The models themselves. **Gated, not included in this repo** | Step 3 |
+| **Your data** (images; for stage 2 also a splat `.ply` and COLMAP model) | Input | Step 5 |
+
+### Step 1: install uv
+
+Follow the [uv installation guide](https://docs.astral.sh/uv/getting-started/installation/). On Windows PowerShell:
+
+```powershell
+powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+```
+
+On macOS/Linux: `curl -LsSf https://astral.sh/uv/install.sh | sh`. Open a new terminal afterwards so `uv` is on your PATH.
+
+### Step 2: get the code and install dependencies
+
+```bash
+git clone https://github.com/JoshHyde04/Semantic-Splatting-Codebase.git
+cd <this-repo>
+uv sync
+```
+
+`uv sync` creates a `.venv` and installs everything in `pyproject.toml`, including the CUDA build of PyTorch. **The first sync downloads several GB** and can take a while. `uv run ...` would install on demand anyway, but running `uv sync` up front means any install problem shows up now rather than in the middle of a job. `uv` will also fetch a suitable Python (3.10 to 3.13) if you don't have one.
+
+What gets installed: torch, torchvision, pillow, numpy, matplotlib, scikit-learn, scipy, joblib, plyfile, safetensors, tqdm, plus `omegaconf`, `termcolor` and `torchmetrics`. The last three are there because DINOv3's `hubconf.py` may import modules that need them. If model loading fails with a missing-module error, add that module to `pyproject.toml` and run `uv sync` again.
+
+### Step 3: download the DINOv3 weights
+
+The weights are **gated**: you need to request access from Meta (the form is linked from the [DINOv3 repository](https://github.com/facebookresearch/dinov3)), then download the `.pth` file(s) they provide. Check the DINOv3 licence terms before redistributing weights; this repo does not include them.
+
+Put the files in the project root (the folder containing `pyproject.toml`), using these names, and the scripts will find them with no extra flags:
+
+| Model | File | Used by |
+|---|---|---|
+| ViT-7B (default) | `dinov3_vit7b16.pth` | `--model vit` |
+| ConvNeXt-L | `dinov3_convnext_large.pth` | `--model convnext` |
+
+If you keep them elsewhere, pass `--model-path path\to\file.pth`. You only need the weights for the model you plan to use.
+
+### Step 4: DINOv3 repository (automatic)
+
+The code loads the model through DINOv3's own repo, which needs a local copy. **The scripts clone it into `./dinov3` automatically the first time they need it**, which requires `git` and internet access. If you'd rather do it yourself (for example to pin a specific commit):
+
+```bash
+git clone https://github.com/facebookresearch/dinov3.git dinov3
+```
+
+Use `--repo-dir` if you put it somewhere else.
+
+### Step 5: prepare your data
+
+Stage 1 only needs a folder of images. Stage 2 also needs a Gaussian splat and a COLMAP model; the exact requirements are in [Input data requirements](#input-data-requirements). To try the pipeline on the dataset it was developed with, see [Example dataset and exact run](#example-dataset-and-exact-run).
+
+### Step 6: check the install
+
+```bash
+uv run python -c "import torch; print(torch.__version__, 'CUDA available:', torch.cuda.is_available())"
+```
+
+This should print `CUDA available: True` on a machine with an NVIDIA GPU. For a full end-to-end check of the model and weights on a single image, run one of the [standalone previews](#standalone-previews).
+
+### Hardware
+
 - An NVIDIA GPU is strongly recommended. The ViT-7B weights alone need roughly 14 GB of VRAM in bf16, plus activations, so a 24 GB card is comfortable. ConvNeXt-L needs far less.
 - CPU-only works in principle but is impractically slow for ViT-7B.
 - Several GB of system RAM: the ViT blending step accumulates a float32 feature map on the CPU (about 0.75 GB for a 4000x3000 image).
-- `pyproject.toml` installs CUDA 12.8 builds of PyTorch on Windows and Linux. On macOS it falls back to the default PyPI build (CPU/MPS is not specially handled). For a different CUDA version, edit `cu128` in the `[[tool.uv.index]]` and `[tool.uv.sources]` sections.
-
-**Software**
-- [uv](https://docs.astral.sh/uv/getting-started/installation/). It creates the environment and installs everything.
-- `git` on your PATH, and internet access on the first run, because the DINOv3 repo is cloned automatically into `./dinov3`. If you'd rather clone it yourself: `git clone https://github.com/facebookresearch/dinov3.git dinov3`.
-- Python 3.10 to 3.13 (`uv` will fetch a suitable one).
-
-**Python dependencies** (installed by `uv` from `pyproject.toml`): torch, torchvision, pillow, numpy, matplotlib, scikit-learn, scipy, joblib, plyfile, safetensors, tqdm, plus `omegaconf`, `termcolor` and `torchmetrics`. The last three are there because DINOv3's `hubconf.py` may import modules that need them. If model loading fails with a missing-module error, add that module to `pyproject.toml`.
-
-**DINOv3 weights (you must obtain these yourself)**
-The weights are gated. Request access via Meta's DINOv3 release, download the `.pth` files, and place them where you like (default expected names in the working directory):
-- `dinov3_vit7b16.pth` for `--model vit`
-- `dinov3_convnext_large.pth` for `--model convnext`
-
-Check the DINOv3 licence terms before redistributing weights. This repo does not include them.
+- `pyproject.toml` installs CUDA 12.8 builds of PyTorch on Windows and Linux. On macOS it falls back to the default PyPI build (CPU/MPS is not specially handled). For a different CUDA version, edit `cu128` in the `[[tool.uv.index]]` and `[tool.uv.sources]` sections, then run `uv sync` again.
 
 ## Input data requirements
 
@@ -61,6 +117,8 @@ Important assumptions:
 
 ## Quick start
 
+Once [Setup](#setup) is done:
+
 ```bash
 # 1. Extract features for all images in a folder (ViT-7B by default)
 uv run feature_extractor.py --images-dir path/to/images
@@ -73,7 +131,7 @@ uv run semantic_splatter.py \
     --features-dir features_vit
 ```
 
-The first `uv run` creates a virtual environment and downloads PyTorch (a few GB). After that, runs start quickly. Quote any path that contains spaces.
+The line continuations (`\`) above are for bash. In PowerShell use a backtick (`` ` ``) instead, or put the command on one line. Quote any path that contains spaces.
 
 ## Example dataset and exact run
 
@@ -109,8 +167,27 @@ uv run semantic_splatter.py \
     --features-dir features_vit
 ```
 
-`regular.ply` is the splat file used in the original experiments. Point `--ply` at your own splat or chunk file. Use whichever folder contains `cameras.bin`, `images.bin` and `points3D.bin` for `--colmap-dir` (`colmap/sparse/0` in the copy used here). On Windows PowerShell, use `$DATA = "datasets\..."` and `$DATA\corrected\images` instead.
+`regular.ply` is the splat file used in the original experiments. Point `--ply` at your own splat or chunk file. Use whichever folder contains `cameras.bin`, `images.bin` and `points3D.bin` for `--colmap-dir` (`colmap/sparse/0` in the copy used here).
 
+**Windows PowerShell** version of the same two commands (backticks continue lines):
+
+```powershell
+$DATA = "datasets\_indonesia_tabuhan_p1_20250210\_indonesia_tabuhan_p1_20250210"
+
+uv run feature_extractor.py `
+    --images-dir "$DATA\corrected\images" `
+    --chunk-file "5x5#-10_-10_-5_-5#-2_-2.ply" `
+    --colmap-dir "$DATA\colmap\sparse\0" `
+    --output-dir features_vit
+
+uv run semantic_splatter.py `
+    --ply regular.ply `
+    --colmap-dir "$DATA\colmap\sparse\0" `
+    --images-dir "$DATA\corrected\images" `
+    --features-dir features_vit
+```
+
+Results from this refactored version are close to, but not identical to, the original unrefactored scripts. In particular, features at the outer image border now get non-zero weight in the ViT tile blending, the PCA is fitted on randomly chosen images rather than the first few, and the default compressed size is 64 channels rather than 256 (set `--n-components 256` to match the older setting).
 
 ## Stage 1: `feature_extractor.py`
 
@@ -169,7 +246,7 @@ Other options: `--feature-dim` (auto-detected from the feature files), `--guided
 
 ## Standalone previews
 
-`vit_processor.py` and `convnext_processor.py` run on a single image and save a side-by-side of the image and its feature PCA. This is a quick way to check the model works and see what features look like:
+`vit_processor.py` and `convnext_processor.py` run on a single image and save a side-by-side of the image and its feature PCA. This is a quick way to check the model and weights work and see what features look like:
 
 ```bash
 uv run vit_processor.py --image path/to/image.jpg --model-path dinov3_vit7b16.pth
@@ -197,13 +274,16 @@ uv run feature_extractor.py --images-dir path/to/images \
 
 ## Troubleshooting
 
+- **`uv: command not found`:** install uv (Step 1) and open a new terminal.
+- **`CUDA available: False`:** check your NVIDIA driver, and that `pyproject.toml` points at a CUDA build that matches it (see [Hardware](#hardware)). Running `uv sync` again after editing it applies the change.
 - **Out of GPU memory (ViT):** lower `--batch-size`, or reduce `--patch-size`.
-- **`Weights not found`:** download the gated `.pth` file and pass `--model-path`.
-- **Missing module when loading the model:** add it to `pyproject.toml` (DINOv3's hub code can pull in extra imports).
-- **Could not clone DINOv3:** install `git`, or clone manually into `./dinov3`.
+- **`Weights not found`:** download the gated `.pth` file (Step 3) and pass `--model-path`, or put it in the project root with its default name.
+- **Missing module when loading the model:** add it to `pyproject.toml` and run `uv sync` (DINOv3's hub code can pull in extra imports).
+- **Could not clone DINOv3:** install `git`, or clone manually into `./dinov3` (Step 4).
 - **Feature-dimension errors in stage 2:** `--feature-dim` is auto-detected, so this usually means the features folder mixes outputs from different runs. Use a clean `--output-dir`.
 - **`No .safetensors feature files found`:** check `--features-dir` points at stage 1's output folder.
 - **Few or no images matched in stage 2:** check that the COLMAP image names match files under `--images-dir`, and that the splat and COLMAP model share a coordinate frame.
+- **Paths with backslashes break in bash/Git Bash:** use forward slashes or quote the path.
 
 ## Known limitations
 

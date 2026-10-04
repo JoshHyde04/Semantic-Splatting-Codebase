@@ -1,0 +1,38 @@
+# --- Python / uv ---
+.venv/
+__pycache__/
+*.py[cod]
+# Keep uv.lock and .python-version committed for reproducibility
+
+# --- DINOv3 (auto-cloned on first run) ---
+dinov3/
+
+# --- Model weights (gated, large) ---
+*.pth
+*.pt
+*.ckpt
+
+# --- Input data (download separately, see README) ---
+datasets/
+data/
+
+# --- Generated features ---
+features_*/
+*.safetensors
+
+# --- Generated outputs ---
+*.ply
+*.npy
+*_test_output*.png
+
+# --- PCA matrices ---
+# Ignored by default. Remove this line to commit them, which guarantees
+# everyone uses an identical PCA projection.
+*.joblib
+
+# --- Editors / OS ---
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+.env
